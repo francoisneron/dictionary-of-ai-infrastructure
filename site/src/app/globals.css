@@ -112,6 +112,77 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/*
+ * Section washes.
+ *
+ * Opening a term repaints the page in that section's colour. Registering the
+ * colour tokens makes the *variables* animatable, so the transition is
+ * declared once here and every rule that reads them follows — rather than
+ * every surface needing its own transition, which would collide with the ones
+ * the labels, chrome and search field already declare for other properties.
+ */
+@property --color-paper {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #eaeae8;
+}
+/* The label halos build their own rgba() from these channels, so this has to
+   travel with --color-paper. Left un-registered it would cut to the new colour
+   instantly and put a dark smudge behind every label for the whole crossfade. */
+@property --color-paper-rgb {
+  syntax: "<number>#";
+  inherits: true;
+  initial-value: 234, 234, 232;
+}
+@property --color-ink {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #1a1a19;
+}
+@property --surface {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #e2e2e0;
+}
+@property --surface-2 {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #d9d9d7;
+}
+@property --section-paper {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #f2f2f0;
+}
+@property --section-ink {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #1a1a19;
+}
+@property --line {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #1a1a1924;
+}
+@property --line-strong {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #1a1a1947;
+}
+
+:root {
+  transition:
+    --color-paper 0.45s var(--ease-gleasing),
+    --color-paper-rgb 0.45s var(--ease-gleasing),
+    --color-ink 0.45s var(--ease-gleasing),
+    --surface 0.45s var(--ease-gleasing),
+    --surface-2 0.45s var(--ease-gleasing),
+    --section-paper 0.45s var(--ease-gleasing),
+    --section-ink 0.45s var(--ease-gleasing),
+    --line 0.45s var(--ease-gleasing),
+    --line-strong 0.45s var(--ease-gleasing);
+}
+
 .sr-only {
   position: absolute;
   width: 1px;
@@ -202,11 +273,23 @@ body {
   font-weight: 600;
 }
 
+/* Every node keeps its name; the ones that lost the placement contest recede
+   rather than vanish. They are deliberately not click targets — eighty-four
+   overlapping buttons across the dense middle would swallow the drags that turn
+   the map. The node underneath stays pickable on the canvas, which is the real
+   target anyway. Keyboard focus is unaffected. */
+.atlas-label.is-faint {
+  pointer-events: none;
+}
+
 .atlas-label:focus-visible {
   outline: 1.5px solid var(--color-ink);
   outline-offset: 2px;
-  opacity: 1;
+  /* Beats the per-frame inline opacity, which would otherwise leave a faint
+     label faint while it is the focused element. */
+  opacity: 1 !important;
   visibility: visible;
+  pointer-events: auto;
 }
 
 /* --- chrome buttons ---------------------------------------------------- */
@@ -216,19 +299,36 @@ body {
   z-index: 5;
   display: flex;
   gap: 6px;
+  /* Both corners step aside when the entry panel is open. Held at the viewport
+     edge they sit on top of it — the info button over the panel's own close
+     control, the toggles over its prev/next footer. */
+  right: calc(var(--chrome-inset) + var(--panel-width, 0px));
+  transition:
+    right var(--duration) var(--ease-gleasing),
+    opacity var(--duration-fast) var(--ease-gleasing);
 }
 
 .chrome-corner-tr {
   top: var(--chrome-inset);
-  right: var(--chrome-inset);
 }
 
 .chrome-corner-br {
-  /* Steps aside when the entry panel is open, so the toggles never sit on top
-     of its prev/next footer. */
-  right: calc(var(--chrome-inset) + var(--panel-width, 0px));
   bottom: var(--chrome-inset);
-  transition: right var(--duration) var(--ease-gleasing);
+}
+
+/* Too narrow to step around: the panel is the whole viewport, so the map's
+   controls withdraw rather than float over what you are reading — the info
+   button lands squarely on the panel's own close control otherwise, and the
+   search field over its section label. Visibility flips only after the fade so
+   they don't blink out. */
+.panel-fills-view .chrome-corner,
+.panel-fills-view .atlas-search {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    opacity var(--duration-fast) var(--ease-gleasing),
+    visibility 0s linear var(--duration-fast);
 }
 
 .chrome-button {
@@ -700,38 +800,185 @@ body {
 
 /* --- info modal -------------------------------------------------------- */
 
-.info-modal {
+/*
+ * A centred dialog over a scrim, rather than a popover pinned under its button:
+ * it is the one surface that is about the whole map instead of a part of it.
+ */
+.info-backdrop {
   position: fixed;
-  top: calc(var(--chrome-inset) + 48px);
-  right: var(--chrome-inset);
+  inset: 0;
   z-index: 6;
-  width: min(370px, calc(100vw - 2 * var(--chrome-inset)));
-  padding: 20px 22px 18px;
+  display: grid;
+  place-items: center;
+  padding: var(--chrome-inset);
+  /* A plain dark scrim, not one mixed from the ink. On a dark section wash the
+     ink is near-white, and a light scrim would bleach the map rather than push
+     it back. */
+  background: rgba(0, 0, 0, 0.38);
+  animation: info-fade var(--duration-fast) var(--ease-gleasing);
+}
+
+@keyframes info-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+.info-modal {
+  position: relative;
+  width: min(430px, 100%);
+  /* Short viewports scroll the dialog rather than pushing its foot off-screen. */
+  max-height: calc(100dvh - 2 * var(--chrome-inset));
+  overflow-y: auto;
+  padding: 26px 30px 22px;
   background: var(--section-paper);
-  border: 1px solid var(--line-strong);
-  border-radius: 3px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  animation: info-rise var(--duration-fast) var(--ease-gleasing);
+}
+
+@keyframes info-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
 }
 
 .info-modal h2 {
-  margin: 0 0 10px;
+  /* Clear of the close button, which floats in the same band. */
+  margin: 0 0 12px;
+  padding-right: 34px;
   font-family: var(--font-ui);
-  font-size: 17px;
-  font-weight: 600;
+  font-size: 21px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
 }
 
 .info-modal p {
-  margin: 0 0 10px;
+  margin: 0 0 12px;
   font-family: var(--font-serif);
   font-size: 14.5px;
   line-height: 1.48;
 }
 
-.info-modal-keys {
+/* Outruns `.info-modal p`, which would otherwise set these back to serif. */
+.info-modal .info-eyebrow {
+  margin: 0 0 7px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  opacity: 0.55;
+}
+
+.info-modal .info-eyebrow-spaced {
+  margin-top: 20px;
+}
+
+.info-rule {
+  height: 0;
+  margin: 20px 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+
+.info-modal .info-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin: 0;
+}
+
+.info-modal .info-links a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 13px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  color: var(--color-ink);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  text-decoration: none;
+  transition: border-color var(--duration-fast) var(--ease-gleasing);
+}
+
+.info-modal .info-links a:hover {
+  border-color: var(--color-ink);
+}
+
+.info-person {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--color-ink);
+  text-decoration: none;
+}
+
+.info-person img {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  /* The avatar is a photograph on a coloured page; a hairline keeps it from
+     floating once the section wash is dark. */
+  border: 1px solid var(--line);
+}
+
+.info-person-text {
+  display: flex;
+  flex-direction: column;
+  font-family: var(--font-ui);
+  line-height: 1.3;
+}
+
+.info-person-text strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.info-person-text span {
+  font-size: 11.5px;
+  opacity: 0.6;
+}
+
+.info-person:hover .info-person-text strong {
+  text-decoration: underline;
+}
+
+/* The inspired-by pair: same row, smaller, name on one line rather than a
+   name-and-role stack. Doubled class so the size beats `.info-person img`
+   whatever order the two rules end up in. */
+.info-modal .info-people {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 22px;
+  margin: 0;
+}
+
+.info-person.info-person-sm {
+  gap: 8px;
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+}
+
+.info-person.info-person-sm img {
+  width: 24px;
+  height: 24px;
+}
+
+.info-person-sm:hover span {
+  text-decoration: underline;
+}
+
+.info-modal .info-modal-keys {
   display: flex;
   flex-wrap: wrap;
   gap: 4px 14px;
-  font-family: var(--font-mono) !important;
-  font-size: 10px !important;
+  margin: 22px 0 0;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+  font-family: var(--font-mono);
+  font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   opacity: 0.65;
@@ -743,14 +990,24 @@ body {
 }
 
 .info-modal-close {
-  padding: 5px 11px;
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
   border: 1px solid var(--line);
-  border-radius: 2px;
+  border-radius: 50%;
   background: transparent;
   color: var(--color-ink);
-  font-family: var(--font-ui);
-  font-size: 12.5px;
   cursor: pointer;
+  transition: border-color var(--duration-fast) var(--ease-gleasing);
+}
+
+.info-modal-close:hover {
+  border-color: var(--color-ink);
 }
 
 /* --- loading screen ---------------------------------------------------- */

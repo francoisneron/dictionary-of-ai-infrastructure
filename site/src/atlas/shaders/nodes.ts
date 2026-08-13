@@ -4,8 +4,11 @@
 // points clip out entirely once their centre leaves the frustum — both fatal
 // for a map you fly into.
 //
-// Everything that changes on hover, selection or colour mode is a uniform
-// compared against the per-instance index, so no buffer is ever re-uploaded.
+// Everything that changes on hover or selection is a uniform compared against
+// the per-instance index, so no buffer is ever re-uploaded.
+//
+// Nodes carry no section colour. A term's section is expressed by the colour of
+// the whole page while that term is open, not by tinting eighty-four dots.
 
 import { GLSL_COMMON } from "./common";
 
@@ -15,7 +18,6 @@ precision highp float;
 in vec2 aCorner;    // per-vertex, [-1,1]
 in vec3 aPos;       // per-instance, world
 in float aRadius;   // per-instance, world units
-in float aSection;
 in float aIndex;
 in float aStatus;   // 1 = published, 0 = draft
 
@@ -31,7 +33,6 @@ uniform float uFadeNear;
 uniform float uFadeFar;
 
 out vec2 vUv;
-out float vSection;
 out float vStatus;
 out float vState;   // 0 idle, 1 hover, 2 focus
 out float vRad;     // device px
@@ -49,7 +50,7 @@ void main() {
     gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
     vUv = vec2(2.0);
     vRad = 0.0; vQuad = 1.0; vFade = 0.0;
-    vSection = aSection; vStatus = aStatus; vState = 0.0;
+    vStatus = aStatus; vState = 0.0;
     return;
   }
 
@@ -72,7 +73,6 @@ void main() {
   gl_Position = vec4((ndc + offset) * clip.w, clip.z, clip.w);
 
   vUv = aCorner;
-  vSection = aSection;
   vStatus = aStatus;
   vState = state;
   vRad = rpx;
@@ -85,17 +85,14 @@ export const NODE_FRAG = /* glsl */ `#version 300 es
 precision highp float;
 
 in vec2 vUv;
-in float vSection;
 in float vStatus;
 in float vState;
 in float vRad;
 in float vQuad;
 in float vFade;
 
-uniform vec3 uPalette[16];
 uniform vec3 uInk;
 uniform vec3 uPaper;
-uniform float uColorMode;
 uniform float uDim;
 uniform float uDpr;
 
@@ -113,16 +110,13 @@ void main() {
 
   float inDisc = 1.0 - smoothstep(vRad - aa, vRad + aa, d);
 
-  int idx = int(clamp(vSection, 0.0, 15.0) + 0.5);
-  vec3 core = mix(uInk, uPalette[idx], uColorMode);
-
   // Draft terms — curriculum entries with no file yet — render as hollow rings.
   if (vStatus < 0.5) {
     float innerR = max(vRad - 1.5 * uDpr, 0.0);
     inDisc *= max(smoothstep(innerR - aa, innerR + aa, d), 0.08);
   }
 
-  vec3 color = mix(uPaper, core, inDisc);
+  vec3 color = mix(uPaper, uInk, inDisc);
 
   float dim = vState > 0.5 ? 1.0 : uDim;
   float a = inHalo * dim * mix(vFade, 1.0, vState > 0.5 ? 1.0 : 0.0);

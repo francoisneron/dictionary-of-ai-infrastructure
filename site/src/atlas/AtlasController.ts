@@ -18,7 +18,7 @@ import {
   EDGE_SEGMENTS,
   PARTICLES_PER_EDGE,
 } from "./shaders/edges";
-import { INK, PAPER, paletteArray } from "./palette";
+import { INK, PAPER } from "./palette";
 import {
   defaultCamera,
   clampDistance,
@@ -33,8 +33,7 @@ import {
   type Flight,
 } from "./camera";
 
-const PALETTE_SLOTS = 16;
-const NODE_STRIDE = 7 * 4; // pos(3) radius section index status
+const NODE_STRIDE = 6 * 4; // pos(3) radius index status
 const EDGE_STRIDE = 11 * 4; // p0(3) p1(3) a b curve w tier
 const HOVER_SLOP_PX = 8;
 const DRIFT_AMPLITUDE = 0.009;
@@ -52,8 +51,19 @@ function baseRadius(degree: number): number {
 /** Radians per second the graph turns when nothing is selected. */
 const IDLE_SPIN = 0.045;
 
+/** Camera distances between which the share of labelled terms ramps. */
+const LABEL_LOD_FAR = 4.6;
+const LABEL_LOD_NEAR = 1.7;
+/** Share of terms labelled when the camera is fully pulled back. */
+const LABEL_LOD_MIN_SHARE = 0.38;
+/** Extra share a label already on screen is judged against, so one sitting on
+ *  the threshold does not blink as the distance wobbles. */
+const LABEL_LOD_HYSTERESIS = 0.08;
+
 export type LodState = {
   labelDegreeFloor: number;
+  /** The floor a label already on screen is held to — always ≤ the above. */
+  labelDegreeFloorHold: number;
   distance: number;
   /** Depth range of the graph right now, so labels fade exactly like nodes. */
   fadeNear: number;
@@ -97,7 +107,6 @@ export class AtlasController {
 
   private hover = -1;
   private focus = -1;
-  private colorMode = 0;
   private reducedMotion = false;
   private startedAt = 0;
   /** Idle rotation pauses for a moment after any deliberate interaction. */
@@ -123,6 +132,7 @@ export class AtlasController {
   private projected: Float32Array;
   private lod: LodState = {
     labelDegreeFloor: 0,
+    labelDegreeFloorHold: 0,
     distance: 3,
     fadeNear: 0,
     fadeFar: 1,
@@ -133,8 +143,24 @@ export class AtlasController {
   private depthMin = 0;
   private depthMax = 1;
   private labelSync: LabelSync | null = null;
-  private degreeFloors = { far: 0, mid: 0, near: 0 };
-  private insetRight = 0;
+  private sortedDegrees: number[] = [];
+  /**
+   * Sideways screen offset in CSS px that keeps a focused node clear of the
+   * panel, and the value it is easing towards. Held in screen units rather than
+   * world units on purpose — see `viewCamera`.
+   */
+  private shiftPx = 0;
+  private shiftTarget = 0;
+  /** Scratch for the rendered camera, so the render loop still allocates nothing. */
+  private viewCam: Camera = defaultCamera();
+  /**
+   * Page colours, tweened. A section change washes the canvas across rather
+   * than cutting to it, on the same curve the stylesheet uses for the DOM.
+   */
+  private paper = new Float32Array(PAPER);
+  private ink = new Float32Array(INK);
+  private paperTarget = new Float32Array(PAPER);
+  private inkTarget = new Float32Array(INK);
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -167,20 +193,11 @@ export class AtlasController {
       ...atlas.nodes.map((n) => Math.hypot(n.x, n.y, n.z))
     );
 
-    // Degree thresholds for the label level of detail, ordered far -> near.
-    // Pulled back, only the hubs are labelled; flown in, everything is, so the
-    // floor must fall to zero rather than to some percentile — otherwise the
-    // least-connected terms are never named at any distance.
-    const sorted = atlas.nodes.map((n) => n.degree).sort((a, b) => a - b);
-    const at = (fraction: number) =>
-      sorted[
-        Math.min(sorted.length - 1, Math.floor(fraction * sorted.length))
-      ] ?? 0;
-    this.degreeFloors = {
-      far: at(0.58), // roughly the top 40%
-      mid: at(0.25), // roughly the top 75%
-      near: 0, // every term
-    };
+    // Degrees ascending — the ladder the label level of detail walks up and
+    // down. Pulled back only the hubs are labelled; flown in, everything is,
+    // so the floor reaches zero rather than some percentile, or the
+    // least-connected terms would never be named at any distance.
+    this.sortedDegrees = atlas.nodes.map((n) => n.degree).sort((a, b) => a - b);
 
     this.reducedMotion =
       typeof matchMedia === "function" &&
@@ -214,16 +231,15 @@ export class AtlasController {
 
   private nodeInstanceData(): Float32Array {
     const nodes = this.atlas.nodes;
-    const data = new Float32Array(nodes.length * 7);
+    const data = new Float32Array(nodes.length * 6);
     nodes.forEach((n, i) => {
-      const o = i * 7;
+      const o = i * 6;
       data[o] = n.x;
       data[o + 1] = n.y;
       data[o + 2] = n.z;
       data[o + 3] = baseRadius(n.degree);
-      data[o + 4] = n.section;
-      data[o + 5] = n.i;
-      data[o + 6] = n.status === "published" ? 1 : 0;
+      data[o + 4] = n.i;
+      data[o + 5] = n.status === "published" ? 1 : 0;
     });
     return data;
   }
@@ -242,10 +258,8 @@ export class AtlasController {
       "uFocus",
       "uFadeNear",
       "uFadeFar",
-      "uPalette",
       "uInk",
       "uPaper",
-      "uColorMode",
       "uDim",
     ]);
 
@@ -268,14 +282,12 @@ export class AtlasController {
     bindAttribs(gl, this.nodeProgram, inst, NODE_STRIDE, [
       { name: "aPos", size: 3, offset: 0, divisor: 1 },
       { name: "aRadius", size: 1, offset: 12, divisor: 1 },
-      { name: "aSection", size: 1, offset: 16, divisor: 1 },
-      { name: "aIndex", size: 1, offset: 20, divisor: 1 },
-      { name: "aStatus", size: 1, offset: 24, divisor: 1 },
+      { name: "aIndex", size: 1, offset: 16, divisor: 1 },
+      { name: "aStatus", size: 1, offset: 20, divisor: 1 },
     ]);
 
     gl.bindVertexArray(null);
     gl.useProgram(this.nodeProgram);
-    gl.uniform3fv(this.nodeUni.uPalette!, paletteArray(PALETTE_SLOTS));
     gl.uniform3fv(this.nodeUni.uInk!, new Float32Array(INK));
     gl.uniform3fv(this.nodeUni.uPaper!, new Float32Array(PAPER));
   }
@@ -632,8 +644,21 @@ export class AtlasController {
     this.userActiveUntil = performance.now() + 3500;
   }
 
-  setColorMode(on: boolean): void {
-    this.colorMode = on ? 1 : 0;
+  /**
+   * The page's paper and ink. Handed in rather than derived here so the canvas
+   * and the stylesheet cannot disagree about what colour the page is — the
+   * halo punched around every node has to be exactly the page behind it.
+   */
+  setTheme(
+    paper: [number, number, number],
+    ink: [number, number, number]
+  ): void {
+    this.paperTarget.set(paper);
+    this.inkTarget.set(ink);
+    if (this.reducedMotion) {
+      this.paper.set(paper);
+      this.ink.set(ink);
+    }
   }
 
   setLabelSync(fn: LabelSync | null): void {
@@ -642,7 +667,7 @@ export class AtlasController {
 
   /** Width of chrome covering the right edge, in CSS px. */
   setInsetRight(px: number): void {
-    this.insetRight = px;
+    this.shiftTarget = px / 2;
   }
 
   getCamera(): Camera {
@@ -654,27 +679,41 @@ export class AtlasController {
   }
 
   /**
-   * Frames a node: the camera swings to look at it from a slightly different
-   * angle each time, which keeps the sense of orbiting a solid object rather
-   * than sliding across a plane.
+   * Frames a node and turns it to the front of the graph.
+   *
+   * The camera swings onto the ray running from the centre of the layout out
+   * through the node, so the node ends up between the viewer and everything
+   * else and the rest of the map falls in behind it. The rotation is therefore
+   * a function of where the term actually sits in the volume rather than a
+   * fixed nudge: one buried at the back swings the map around half a turn,
+   * while one already facing you barely moves at all.
    */
   flyTo(index: number, distance = 2.45): void {
     const n = this.atlas.nodes[index];
     if (!n) return;
 
-    // Shift the look-at point sideways so the node lands clear of the panel.
-    const worldShift =
-      (((this.insetRight * this.dpr) / 2) * distance) / this.projScale();
-    const az = this.cam.azimuth + (index % 2 === 0 ? 0.34 : -0.34);
-    const right = [Math.cos(az), 0, -Math.sin(az)] as const;
+    // Direction from the graph's centre out to the node, as orbit angles.
+    // Inverse of `eyePosition`: it places the eye on the outward side, so the
+    // node is the nearest point of the graph along the view axis.
+    const len = Math.hypot(n.x, n.y, n.z);
+    const outward = len > 1e-3;
+    const azimuth = outward ? Math.atan2(n.x, n.z) : this.cam.azimuth;
+    const elevation = outward
+      ? Math.asin(Math.min(1, Math.max(-1, n.y / len)))
+      : this.cam.elevation;
 
+    // The look-at point is the node itself. Room for the panel is made in
+    // `viewCamera`, per frame, in screen units — not baked in here.
     const target: Camera = {
-      tx: n.x + right[0] * worldShift,
+      tx: n.x,
       ty: n.y,
-      tz: n.z + right[2] * worldShift,
+      tz: n.z,
       distance: clampDistance(distance),
-      azimuth: az,
-      elevation: clampElevation(this.cam.elevation * 0.6 + 0.16),
+      azimuth,
+      // A few degrees above the ray. Far too small to disturb which node is in
+      // front, and it keeps the framing from going dead flat for the many terms
+      // that sit near the layout's equator.
+      elevation: clampElevation(elevation + 0.1),
     };
 
     if (this.reducedMotion) {
@@ -733,6 +772,67 @@ export class AtlasController {
 
   // --- render ------------------------------------------------------------
 
+  /**
+   * Eases the panel offset. It changes when a term opens, when one closes, and
+   * on resize; stepped straight to its target the whole map lurches sideways.
+   */
+  private easeShift(dt: number): void {
+    if (this.reducedMotion) {
+      this.shiftPx = this.shiftTarget;
+      return;
+    }
+    const remaining = this.shiftTarget - this.shiftPx;
+    if (Math.abs(remaining) < 0.05) {
+      this.shiftPx = this.shiftTarget;
+      return;
+    }
+    // Frame-rate independent: the same curve at 60Hz and 144Hz.
+    this.shiftPx += remaining * (1 - Math.exp(-dt * 9));
+  }
+
+  /**
+   * Crossfades paper and ink towards the active section's wash. Rate 6 lands
+   * within a frame or two of the 0.45s CSS transition on the DOM, so the panel
+   * and the map change colour together rather than in sequence.
+   */
+  private easeTheme(dt: number): void {
+    if (this.reducedMotion) return;
+    const k = 1 - Math.exp(-dt * 6);
+    for (let i = 0; i < 3; i++) {
+      this.paper[i]! += (this.paperTarget[i]! - this.paper[i]!) * k;
+      this.ink[i]! += (this.inkTarget[i]! - this.ink[i]!) * k;
+    }
+  }
+
+  /**
+   * The camera actually rendered.
+   *
+   * The orbit target is the focused node itself; the room made for the panel is
+   * a screen-space offset re-derived from the current distance every frame.
+   * Holding it in world units instead — baked into the target once at fly-to
+   * time — pinned the offset to one distance, so zooming in swung the node
+   * further and further off to the left until it left the viewport, and the
+   * zoom appeared to be centred on empty space rather than on the selection.
+   */
+  private viewCamera(): Camera {
+    const c = this.cam;
+    if (Math.abs(this.shiftPx) < 0.01) return c;
+
+    // Distance cancels the perspective divide, so the node holds exactly this
+    // many CSS px from centre at every zoom level.
+    const world = (this.shiftPx * this.dpr * c.distance) / this.projScale();
+    // [cos, 0, -sin] is the view matrix's own right axis, so this displaces the
+    // node horizontally on screen and not at all vertically, at any elevation.
+    const v = this.viewCam;
+    v.tx = c.tx + Math.cos(c.azimuth) * world;
+    v.ty = c.ty;
+    v.tz = c.tz - Math.sin(c.azimuth) * world;
+    v.distance = c.distance;
+    v.azimuth = c.azimuth;
+    v.elevation = c.elevation;
+    return v;
+  }
+
   /** Steps time-dependent state. Separate from render so renderNow can reuse it. */
   private advance(now: number): void {
     if (this.flight) {
@@ -746,6 +846,8 @@ export class AtlasController {
 
     const dt = Math.min(0.05, (now - this.lastFrame) / 1000);
     this.lastFrame = now;
+    this.easeShift(dt);
+    this.easeTheme(dt);
     if (this.reducedMotion) return;
 
     // A slow turn while nothing is selected: it reads as a solid being shown to
@@ -776,7 +878,7 @@ export class AtlasController {
     const time = this.reducedMotion ? 0 : (now - this.startedAt) / 1000;
     const drift = this.reducedMotion ? 0 : DRIFT_AMPLITUDE;
 
-    viewProjection(this.cam, this.width / this.height, this.viewProj);
+    viewProjection(this.viewCamera(), this.width / this.height, this.viewProj);
 
     // Project before drawing: the fade has to be normalised over the graph's
     // measured depth spread this frame, not an assumed one. A bounding sphere
@@ -792,12 +894,17 @@ export class AtlasController {
     const fadeNear = this.depthMin;
     const fadeFar = this.depthMax;
 
+    // Paper and ink are uniforms now rather than upload-once constants: the
+    // page changes colour per section. Three vec3s a frame is nothing.
+    gl.clearColor(this.paper[0]!, this.paper[1]!, this.paper[2]!, 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
     // 1. Nodes first, writing depth, so they occlude the edges behind them.
     gl.depthMask(true);
     gl.useProgram(this.nodeProgram);
     gl.bindVertexArray(this.nodeVao);
+    gl.uniform3fv(this.nodeUni.uInk!, this.ink);
+    gl.uniform3fv(this.nodeUni.uPaper!, this.paper);
     gl.uniformMatrix4fv(this.nodeUni.uViewProj!, false, this.viewProj);
     gl.uniform2f(this.nodeUni.uHalfPx!, halfW, halfH);
     gl.uniform1f(this.nodeUni.uProjScale!, scale);
@@ -808,7 +915,6 @@ export class AtlasController {
     gl.uniform1f(this.nodeUni.uFocus!, this.focus);
     gl.uniform1f(this.nodeUni.uFadeNear!, fadeNear);
     gl.uniform1f(this.nodeUni.uFadeFar!, fadeFar);
-    gl.uniform1f(this.nodeUni.uColorMode!, this.colorMode);
     gl.uniform1f(this.nodeUni.uDim!, this.focus >= 0 ? 0.4 : 1);
     gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, this.atlas.nodes.length);
 
@@ -817,6 +923,7 @@ export class AtlasController {
     gl.depthMask(false);
     gl.useProgram(this.edgeProgram);
     gl.bindVertexArray(this.edgeVao);
+    gl.uniform3fv(this.edgeUni.uInk!, this.ink);
     gl.uniformMatrix4fv(this.edgeUni.uViewProj!, false, this.viewProj);
     gl.uniform2f(this.edgeUni.uHalfPx!, halfW, halfH);
     gl.uniform1f(this.edgeUni.uDpr!, this.dpr);
@@ -848,6 +955,7 @@ export class AtlasController {
     if (litNode >= 0 && !this.reducedMotion) {
       gl.useProgram(this.particleProgram);
       gl.bindVertexArray(this.particleVao);
+      gl.uniform3fv(this.particleUni.uInk!, this.ink);
       gl.uniformMatrix4fv(this.particleUni.uViewProj!, false, this.viewProj);
       gl.uniform2f(this.particleUni.uHalfPx!, halfW, halfH);
       gl.uniform1f(this.particleUni.uProjScale!, scale);
@@ -922,16 +1030,33 @@ export class AtlasController {
     this.depthMax = Number.isFinite(hi) ? hi + pad : 1;
   }
 
+  /** The degree below which a term goes unlabelled, for a given share shown. */
+  private degreeForShare(share: number): number {
+    if (share >= 1) return 0;
+    const s = this.sortedDegrees;
+    const idx = Math.min(
+      s.length - 1,
+      Math.max(0, Math.floor((1 - share) * s.length))
+    );
+    return s[idx] ?? 0;
+  }
+
   private syncLabels(fadeNear: number, fadeFar: number): void {
     if (!this.labelSync) return;
     const d = this.cam.distance;
-    const floor =
-      d > 3.4
-        ? this.degreeFloors.far
-        : d > 1.9
-          ? this.degreeFloors.mid
-          : this.degreeFloors.near;
-    this.lod.labelDegreeFloor = floor;
+    // The share of terms labelled ramps continuously with distance. Three fixed
+    // tiers put a whole percentile band on screen in a single frame whenever
+    // the camera crossed one, which reads as the map flashing even though every
+    // label fades in properly on its own.
+    const t = Math.min(
+      1,
+      Math.max(0, (LABEL_LOD_FAR - d) / (LABEL_LOD_FAR - LABEL_LOD_NEAR))
+    );
+    const share = LABEL_LOD_MIN_SHARE + (1 - LABEL_LOD_MIN_SHARE) * t;
+    this.lod.labelDegreeFloor = this.degreeForShare(share);
+    this.lod.labelDegreeFloorHold = this.degreeForShare(
+      Math.min(1, share + LABEL_LOD_HYSTERESIS)
+    );
     this.lod.distance = d;
     // Handed through so labels fade on exactly the curve the shaders use.
     this.lod.fadeNear = fadeNear;

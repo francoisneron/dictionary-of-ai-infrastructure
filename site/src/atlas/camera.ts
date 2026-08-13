@@ -173,7 +173,11 @@ export function planFlight(from: Camera, to: Camera, now: number): Flight {
   return {
     from,
     to: target,
-    duration: Math.min(1100, Math.max(520, 420 + effort * 620)),
+    // The ceiling has to cover the longest flight there is — half a turn, from
+    // a term at the back of the volume to the front. At the old 1100ms bound a
+    // half-turn and a nudge took the same time, so the long ones read as a
+    // whip-round rather than the map being turned.
+    duration: Math.min(1500, Math.max(520, 420 + effort * 620)),
     startedAt: now,
   };
 }

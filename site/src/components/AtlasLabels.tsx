@@ -34,7 +34,8 @@ export default function AtlasLabels({ controller, onSelect }: Props) {
     if (!controller) return;
 
     const count = atlas.nodes.length;
-    const shown = new Uint8Array(count);
+    /** Last frame's rank per label, for hysteresis and dwell. */
+    const shownRank = new Uint8Array(count);
     const marked = new Uint8Array(count);
     const lastOpacity = new Float32Array(count);
     const lastHalo = new Float32Array(count);
@@ -54,38 +55,76 @@ export default function AtlasLabels({ controller, onSelect }: Props) {
     const placedX = new Float32Array(count);
     const placedY = new Float32Array(count);
     const placedW = new Float32Array(count);
-    const visible = new Uint8Array(count);
-    /** When each label last changed visibility, for the minimum-dwell rule. */
+    /**
+     * How prominently each label renders this frame:
+     *   0 — behind the camera, the only case that hides a label outright
+     *   1 — faint: it lost the placement contest, or sits below the zoom's
+     *       degree floor, so it recedes instead of vanishing
+     *   2 — full: it won its place
+     * Every node in front of the camera keeps its name at some strength. A term
+     * with no label at all reads as a node the map has nothing to say about.
+     */
+    const rank = new Uint8Array(count);
+    /** When each label last changed rank, for the minimum-dwell rule. */
     const flippedAt = new Float64Array(count);
 
     // A label already on screen defends its place: its collision box shrinks by
     // this much, so a neighbour has to overlap properly before evicting it.
     // Without the asymmetry, two labels grazing each other trade places every
     // few frames as the map turns, which is what reads as flicker.
-    const HYSTERESIS = 7;
+    const HYSTERESIS = 11;
     /** And once shown or hidden, it holds that state for at least this long. */
-    const DWELL_MS = 900;
+    const DWELL_MS = 1300;
+    /** Slightly longer than the CSS opacity ramp, so a label keeps tracking its
+     *  node until it has finished fading out. */
+    const FADE_MS = 240;
+    /** No label in front of the camera ever reaches zero. A node with no name
+     *  reads as one the map has nothing to say about, which is never true. */
+    const MIN_OPACITY = 0.14;
+    /** The most a faint label reaches, at the very front of the graph. Low
+     *  enough that the placed labels still carry the reading. */
+    const FAINT_CEILING = 0.3;
+
+    // Neighbours as a lookup rather than `Array.includes` per node per frame:
+    // that was two O(n·k) scans every frame to answer a question that only
+    // changes when the lit term does.
+    const isNeighbour = new Uint8Array(count);
+    let litCache = -2;
 
     const sync: LabelSync = (projected, lod, hover, focus) => {
       // Hover wins over selection for the neighbourhood highlight: while a term
       // is open you can still point at any other node and read what it is.
       const lit = hover >= 0 ? hover : focus;
-      const neighbours = lit >= 0 ? atlas.nodes[lit]?.related : null;
+      if (lit !== litCache) {
+        litCache = lit;
+        isNeighbour.fill(0);
+        const rel = lit >= 0 ? atlas.nodes[lit]?.related : null;
+        if (rel) for (const r of rel) isNeighbour[r] = 1;
+      }
 
-      visible.fill(0);
+      rank.fill(0);
       let placed = 0;
       const now = performance.now();
 
       for (const i of byDegree) {
         const node = atlas.nodes[i]!;
         const depth = projected[i * 4 + 2]!;
-        if (depth <= 0) continue; // behind the camera
+        if (depth <= 0) continue; // behind the camera: the one real hide
+
+        // In front of the camera, so it is named. Everything below decides how
+        // strongly, not whether.
+        rank[i] = 1;
 
         // Always legible: whatever is hovered or selected, regardless of zoom
         // or how crowded that part of the map is.
         const active = i === hover || i === focus;
-        const related = neighbours ? neighbours.includes(i) : false;
-        if (!active && !related && node.degree < lod.labelDegreeFloor) continue;
+        const related = isNeighbour[i] === 1;
+        // A label already at full strength is judged against the more generous
+        // hold floor, so a term sitting exactly on the threshold does not flip
+        // back and forth as the camera distance wobbles across it.
+        const floor =
+          shownRank[i] === 2 ? lod.labelDegreeFloorHold : lod.labelDegreeFloor;
+        if (!active && !related && node.degree < floor) continue;
 
         // Centred above the node, clear of its disc at whatever size it renders.
         const radius = projected[i * 4 + 3]!;
@@ -93,12 +132,15 @@ export default function AtlasLabels({ controller, onSelect }: Props) {
         const x = projected[i * 4]! - w / 2;
         const y = projected[i * 4 + 1]! - radius - 6 - H;
 
-        const wasShown = shown[i] === 1;
-        const held = wasShown && now - flippedAt[i]! < DWELL_MS;
+        const wasFull = shownRank[i] === 2;
+        const held = wasFull && now - flippedAt[i]! < DWELL_MS;
 
         if (!active && !related && !held) {
-          const inset = wasShown ? HYSTERESIS : 0;
+          const inset = wasFull ? HYSTERESIS : 0;
           let collides = false;
+          // Only full-strength labels reserve space. Faint ones are allowed to
+          // sit under each other — they are there to say a term exists, and
+          // making them compete would put us back to hiding most of the map.
           for (let p = 0; p < placed; p++) {
             if (
               x + inset < placedX[p]! + placedW[p]! &&
@@ -117,26 +159,36 @@ export default function AtlasLabels({ controller, onSelect }: Props) {
         placedY[placed] = y;
         placedW[placed] = w;
         placed++;
-        visible[i] = 1;
+        rank[i] = 2;
       }
 
       for (let i = 0; i < count; i++) {
         const el = refs.current[i];
         if (!el) continue;
-        const x = projected[i * 4]!;
-        const y = projected[i * 4 + 1]! - projected[i * 4 + 3]! - 6;
-        // translate(-50%,-100%) centres the pill and lifts it clear of the disc.
-        el.style.transform = `translate3d(${x}px, ${y}px, 0) translate(-50%, -100%)`;
 
-        const next = visible[i]!;
-        if (shown[i] !== next) {
-          shown[i] = next;
+        const next = rank[i]!;
+        // Only a label behind the camera and done fading needs no transform.
+        // Each write skipped is a style invalidation the compositor would
+        // otherwise have to reconcile.
+        if (next > 0 || shownRank[i]! > 0 || now - flippedAt[i]! < FADE_MS) {
+          const x = projected[i * 4]!;
+          const y = projected[i * 4 + 1]! - projected[i * 4 + 3]! - 6;
+          // translate(-50%,-100%) centres the pill and lifts it off the disc.
+          el.style.transform = `translate3d(${x}px, ${y}px, 0) translate(-50%, -100%)`;
+        }
+
+        if (shownRank[i] !== next) {
+          shownRank[i] = next;
           flippedAt[i] = now;
-          el.classList.toggle("is-visible", next === 1);
+          el.classList.toggle("is-visible", next > 0);
+          // Faint labels are not click targets. Rendering all eighty-four makes
+          // the dense middle a mat of overlapping buttons, and the canvas would
+          // stop receiving the drags that turn the map.
+          el.classList.toggle("is-faint", next === 1);
         }
 
         const active = i === hover || i === focus;
-        const related = neighbours ? neighbours.includes(i) : false;
+        const related = isNeighbour[i] === 1;
         const mark = active ? 2 : related ? 1 : 0;
         if (marked[i] !== mark) {
           marked[i] = mark;
@@ -144,9 +196,9 @@ export default function AtlasLabels({ controller, onSelect }: Props) {
           el.classList.toggle("is-related", mark === 1);
         }
 
-        // Hidden labels ramp their opacity to zero rather than relying on the
-        // stylesheet, because this inline value always wins over the class —
-        // left alone they would blink out on `visibility` with no fade at all.
+        // Behind the camera ramps to zero rather than relying on the stylesheet,
+        // because this inline value always wins over the class — left alone it
+        // would blink out on `visibility` with no fade at all.
         if (next === 0) {
           if (lastOpacity[i] !== 0) {
             lastOpacity[i] = 0;
@@ -165,9 +217,14 @@ export default function AtlasLabels({ controller, onSelect }: Props) {
             (depth - lod.fadeNear) / Math.max(lod.fadeFar - lod.fadeNear, 1e-3)
           )
         );
-        // The back of the graph reads as almost gone; the front is fully solid.
+        // Depth still recedes, but between a floor and a ceiling rather than
+        // down to nothing: the back of the graph reads as almost gone without
+        // any term losing its name. A faint label's ceiling is low enough that
+        // the ones that won their place still read as the labels.
         const faded = 1 - 0.96 * Math.pow(t, 1.15);
-        const target = mark > 0 ? 1 : Math.round(faded * 50) / 50;
+        const ceiling = next === 2 ? 1 : FAINT_CEILING;
+        const graded = MIN_OPACITY + (ceiling - MIN_OPACITY) * faded;
+        const target = mark > 0 ? 1 : Math.round(graded * 50) / 50;
         // Only write on a real change, with a deadband: quantising alone still
         // churns when a drifting value sits astride a step boundary.
         if (Math.abs(lastOpacity[i]! - target) > 0.015) {
