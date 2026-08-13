@@ -1,0 +1,27 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+
+  "//": [
+    "Build settings live here rather than in the Vercel dashboard so importing",
+    "the repo needs no configuration, and so the settings are reviewable.",
+    "",
+    "The build must run from the REPOSITORY ROOT, not from site/. The generators",
+    "in internal/ read dictionary/ and internal/Curriculum.md and write both",
+    "README.md and site/src/data/. Point the root directory at site/ and they",
+    "never run: the app then builds from whatever data was last committed, so a",
+    "content change deploys stale and the build still goes green.",
+    "",
+    "framework is null on purpose. next.config.ts uses output: 'export', so the",
+    "artifact is plain static files in site/out. Declaring nextjs here would make",
+    "Vercel look for a .next build at the root and fail."
+  ],
+
+  "framework": null,
+  "installCommand": "npm install",
+  "buildCommand": "npm run build",
+  "outputDirectory": "site/out",
+
+  "github": {
+    "silent": true
+  }
+}
