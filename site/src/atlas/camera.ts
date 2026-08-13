@@ -17,10 +17,10 @@ export type Camera = {
   elevation: number;
 };
 
-export const MIN_DISTANCE = 0.55;
-export const MAX_DISTANCE = 6.5;
+const MIN_DISTANCE = 0.55;
+const MAX_DISTANCE = 6.5;
 /** Just short of vertical — at the poles the up vector degenerates. */
-export const MAX_ELEVATION = 1.35;
+const MAX_ELEVATION = 1.35;
 
 export const FOV = (46 * Math.PI) / 180;
 
@@ -45,7 +45,7 @@ export function clampElevation(e: number): number {
   return Math.min(MAX_ELEVATION, Math.max(-MAX_ELEVATION, e));
 }
 
-export function eyePosition(c: Camera): [number, number, number] {
+function eyePosition(c: Camera): [number, number, number] {
   const ce = Math.cos(c.elevation);
   return [
     c.tx + c.distance * ce * Math.sin(c.azimuth),

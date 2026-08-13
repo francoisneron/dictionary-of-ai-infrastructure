@@ -64,7 +64,6 @@ export type LodState = {
   labelDegreeFloor: number;
   /** The floor a label already on screen is held to — always ≤ the above. */
   labelDegreeFloorHold: number;
-  distance: number;
   /** Depth range of the graph right now, so labels fade exactly like nodes. */
   fadeNear: number;
   fadeFar: number;
@@ -133,12 +132,9 @@ export class AtlasController {
   private lod: LodState = {
     labelDegreeFloor: 0,
     labelDegreeFloorHold: 0,
-    distance: 3,
     fadeNear: 0,
     fadeFar: 1,
   };
-  /** Distance from the origin to the furthest node — the graph's own radius. */
-  private graphRadius = 1;
   /** Measured view-space depth of the nearest and furthest node this frame. */
   private depthMin = 0;
   private depthMax = 1;
@@ -187,11 +183,6 @@ export class AtlasController {
     this.events = events;
     this.projected = new Float32Array(atlas.nodes.length * 4);
     this.startedAt = performance.now();
-
-    this.graphRadius = Math.max(
-      0.2,
-      ...atlas.nodes.map((n) => Math.hypot(n.x, n.y, n.z))
-    );
 
     // Degrees ascending — the ladder the label level of detail walks up and
     // down. Pulled back only the hubs are labelled; flown in, everything is,
@@ -407,11 +398,12 @@ export class AtlasController {
       { name: "aCorner", size: 2, offset: 0, divisor: 0 },
     ]);
 
-    // Each edge repeated once per particle, with a stagger offset appended.
-    // Every edge carries instances so selection is a uniform change, not an
-    // upload; the shader hides the ones that are not incident to the focus.
+    // Each edge repeated once per particle, with a stagger offset appended:
+    // p0(3) p1(3) a b curve offset = 10 floats. Every edge carries instances so
+    // selection is a uniform change, not an upload; the shader hides the ones
+    // that are not incident to the focus.
     const edges = this.atlas.edges;
-    const per = 12;
+    const per = 10;
     const data = new Float32Array(edges.length * PARTICLES_PER_EDGE * per);
     const { nodes } = this.atlas;
     let o = 0;
@@ -431,8 +423,6 @@ export class AtlasController {
         // Stagger, offset per edge as well so they don't pulse in unison.
         data[o + 9] =
           k / PARTICLES_PER_EDGE + ((e.a * 7 + e.b * 13) % 100) / 700;
-        data[o + 10] = 0;
-        data[o + 11] = 0;
         o += per;
       }
     });
@@ -1057,7 +1047,6 @@ export class AtlasController {
     this.lod.labelDegreeFloorHold = this.degreeForShare(
       Math.min(1, share + LABEL_LOD_HYSTERESIS)
     );
-    this.lod.distance = d;
     // Handed through so labels fade on exactly the curve the shaders use.
     this.lod.fadeNear = fadeNear;
     this.lod.fadeFar = fadeFar;

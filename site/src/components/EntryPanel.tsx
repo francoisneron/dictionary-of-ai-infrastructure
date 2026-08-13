@@ -31,7 +31,6 @@ export default function EntryPanel({ index, onClose, onNavigate }: Props) {
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
-  const panelRef = useRef<HTMLElement>(null);
 
   const node = index === null ? null : atlas.nodes[index];
 
@@ -137,7 +136,6 @@ export default function EntryPanel({ index, onClose, onNavigate }: Props) {
 
   return (
     <aside
-      ref={panelRef}
       className="entry-panel"
       aria-label={`${node.label}, dictionary entry`}
     >
@@ -225,7 +223,11 @@ export default function EntryPanel({ index, onClose, onNavigate }: Props) {
             {copied === "link" ? "Link copied" : "Share"}
           </button>
           <button type="button" className="action" onClick={copyMarkdown}>
-            {copied === "markdown" ? "Copied" : "Copy markdown"}
+            {copied === "markdown"
+              ? "Copied"
+              : copied === "failed"
+                ? "Copy failed"
+                : "Copy markdown"}
           </button>
         </div>
       </div>

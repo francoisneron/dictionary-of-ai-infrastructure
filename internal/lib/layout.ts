@@ -16,7 +16,7 @@ import type { Edge } from "./graph.js";
 import type { Section } from "./curriculum.js";
 
 export const LOCK_VERSION = 2;
-export const DEFAULT_SEED = 0xa71a5;
+const DEFAULT_SEED = 0xa71a5;
 
 const COLD_TICKS = 900;
 const INCREMENTAL_TICKS = 220;
@@ -39,7 +39,7 @@ export type LayoutResult = {
 };
 
 /** Deterministic PRNG. Nothing in this file may touch Math.random. */
-export function mulberry32(seed: number): () => number {
+function mulberry32(seed: number): () => number {
   let a = seed >>> 0;
   return () => {
     a = (a + 0x6d2b79f5) >>> 0;

@@ -2,8 +2,8 @@
  * Design tokens.
  *
  * The layout scale is vw-proportional, keyed off a nominal device width: --safe
- * and --gap are defined as a fraction of the viewport rather than fixed pixels,
- * so everything downstream recomputes from two variables at each breakpoint.
+ * is defined as a fraction of the viewport rather than fixed pixels, so
+ * everything downstream recomputes from one variable at each breakpoint.
  */
 
 :root {
@@ -12,42 +12,21 @@
   /* Same colour as channels, so label halos can take a depth-varying alpha. */
   --color-paper-rgb: 234, 234, 232;
   --color-ink: #1a1a19;
-  --color-white: #fff;
-  --color-black: #000;
   --surface: #e2e2e0;
   --surface-2: #d9d9d7;
   --line: #1a1a1924;
   --line-strong: #1a1a1947;
   --section-paper: #f2f2f0;
-  --section-ink: #1a1a19;
-
-  /* Accents */
-  --color-blue: #0070f3;
-  --color-purple: #7928ca;
-  --color-red: #e30613;
-  --color-pink: #ff0080;
-  --color-green: #00a86b;
 
   /* Motion */
   --duration-fast: 0.2s;
   --duration: 0.4s;
-  --duration-slow: 0.8s;
   --ease-gleasing: cubic-bezier(0.4, 0, 0, 1);
   --ease-out-expo: cubic-bezier(0.19, 1, 0.22, 1);
-  --ease-out-quart: cubic-bezier(0.165, 0.84, 0.44, 1);
-  --ease-in-out-quart: cubic-bezier(0.77, 0, 0.175, 1);
-  --ease-in-out-cubic: cubic-bezier(0.645, 0.045, 0.355, 1);
 
   /* Layout scale — mobile definitions */
   --device-width: 375;
-  --columns: 4;
   --safe: calc(((16 * 100) / var(--device-width)) * 1vw);
-  --gap: calc(((16 * 100) / var(--device-width)) * 1vw);
-  --layout-width: calc(100vw - (2 * var(--safe)));
-  --column-width: calc(
-    (var(--layout-width) - (var(--columns) - 1) * var(--gap)) / var(--columns)
-  );
-  --header-height: calc(((58 * 100) / var(--device-width)) * 1vw);
 
   /* Distance from the viewport edge to the floating chrome. Scales between
      mobile and desktop rather than sitting at a fixed pixel offset. */
@@ -63,14 +42,12 @@
 @media (min-width: 768px) {
   :root {
     --device-width: 768;
-    --columns: 8;
   }
 }
 
 @media (min-width: 1200px) {
   :root {
     --device-width: 1440;
-    --columns: 12;
   }
 }
 
@@ -79,7 +56,6 @@
   :root {
     --duration-fast: 0.01ms;
     --duration: 0.01ms;
-    --duration-slow: 0.01ms;
   }
   *,
   *::before,
@@ -154,11 +130,6 @@ body {
   inherits: true;
   initial-value: #f2f2f0;
 }
-@property --section-ink {
-  syntax: "<color>";
-  inherits: true;
-  initial-value: #1a1a19;
-}
 @property --line {
   syntax: "<color>";
   inherits: true;
@@ -178,7 +149,6 @@ body {
     --surface 0.45s var(--ease-gleasing),
     --surface-2 0.45s var(--ease-gleasing),
     --section-paper 0.45s var(--ease-gleasing),
-    --section-ink 0.45s var(--ease-gleasing),
     --line 0.45s var(--ease-gleasing),
     --line-strong 0.45s var(--ease-gleasing);
 }
@@ -487,6 +457,7 @@ body {
   z-index: 4;
   display: flex;
   flex-direction: column;
+  /* Must match PANEL_WIDTH in Experience.tsx — the camera shifts by it. */
   width: min(470px, 100vw);
   height: 100dvh;
   background: var(--section-paper);

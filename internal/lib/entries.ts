@@ -6,7 +6,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 // Matches a cross-link to another entry: [inflected text](./Target%20Term.md)
-export const LINK_SOURCE = "\\[([^\\]]+)\\]\\(\\.\\/([^)]+)\\.md\\)";
+const LINK_SOURCE = "\\[([^\\]]+)\\]\\(\\.\\/([^)]+)\\.md\\)";
 
 /** A fresh global regex. Never share one instance — `lastIndex` is stateful. */
 export function linkRe(): RegExp {

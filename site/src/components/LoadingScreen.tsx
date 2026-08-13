@@ -19,10 +19,6 @@ export default function LoadingScreen({ ready }: Props) {
   const raf = useRef(0);
 
   useEffect(() => {
-    const reduced =
-      typeof matchMedia === "function" &&
-      matchMedia("(prefers-reduced-motion: reduce)").matches;
-
     let fontsDone = false;
     document.fonts?.ready.then(() => {
       fontsDone = true;
@@ -63,7 +59,7 @@ export default function LoadingScreen({ ready }: Props) {
           <span
             key={word}
             className="loading-word"
-            style={{ transitionDelay: `${i * 60}ms` }}
+            style={{ animationDelay: `${i * 60}ms` }}
           >
             {word}
           </span>

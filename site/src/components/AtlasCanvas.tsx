@@ -23,7 +23,6 @@ export default function AtlasCanvas({
   onUnsupported,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const controllerRef = useRef<AtlasController | null>(null);
   // Held in refs so a changing callback identity can't tear down the GL context.
   const readyRef = useRef(onReady);
   const selectRef = useRef(onSelect);
@@ -47,7 +46,6 @@ export default function AtlasCanvas({
       return;
     }
 
-    controllerRef.current = controller;
     readyRef.current?.(controller);
 
     if (process.env.NODE_ENV !== "production") {
@@ -56,7 +54,6 @@ export default function AtlasCanvas({
 
     return () => {
       controller.dispose();
-      controllerRef.current = null;
     };
   }, []);
 

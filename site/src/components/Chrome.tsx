@@ -179,7 +179,7 @@ export function InfoModal({
       <button
         ref={triggerRef}
         type="button"
-        className="chrome-button chrome-info"
+        className="chrome-button"
         aria-label="About this project"
         aria-expanded={open}
         onClick={() => {
