@@ -26,6 +26,25 @@ Runpod is spelled with one capital R and a lowercase p. Every prose mention must
 
 Entries carry no headings, no code fences, and no diagrams. The filename is the title; the generator emits it as the heading. Tables are allowed and encouraged where the material is genuinely comparative.
 
+## Deployment
+
+Build settings live in `vercel.json` so the dashboard needs no configuration.
+That file is validated against a strict schema — it accepts only known keys, so
+it cannot carry comments, including the `"//"` convention. The reasoning behind
+each setting is here instead:
+
+- **The build must run from the repository root**, never from `site/`. The
+  generators in `internal/` read `dictionary/` and `internal/Curriculum.md` and
+  write both `README.md` and `site/src/data/`. Rooted at `site/` they never run,
+  so a content change deploys the last committed data and the build still goes
+  green. If an import screen offers to set the root directory to `site`, decline.
+- **`framework` is `null`, not `nextjs`.** `next.config.ts` sets
+  `output: "export"`, so the artifact is plain static files in `site/out`.
+  Declaring Next.js sends the host looking for a `.next` build at the root.
+- **`prepare` is `husky || true`.** Bare `husky` exits non-zero where there is no
+  `.git` directory, which fails `npm install` on any host that builds from a
+  source archive rather than a clone. Hooks still install normally in a clone.
+
 ## Agent skills
 
 ### Issue tracker
