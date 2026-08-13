@@ -180,8 +180,8 @@ export function InfoModal({
           <p>
             Every line is a cross-reference written inside an entry, so the map
             is the writing rather than a diagram of it. {meta.edges} links in
-            total; the {meta.backboneEdges} strongest form the visible skeleton,
-            and a term&apos;s full set appears when you hover or select it.
+            total, drawn only for the term you point at — hover or select one to
+            see the neighbourhood it belongs to.
           </p>
           <p className="info-modal-keys">
             <span>
