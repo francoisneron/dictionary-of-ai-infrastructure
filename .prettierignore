@@ -1,0 +1,7 @@
+README.md
+node_modules
+package-lock.json
+site/.next
+site/out
+site/src/data
+internal/layout.lock.json

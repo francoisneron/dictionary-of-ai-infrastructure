@@ -1,0 +1,41 @@
+name: Content freshness
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Typecheck generators
+        run: npx tsc -p internal/tsconfig.json
+      - name: Regenerate README
+        run: npm run generate:readme
+      - name: Regenerate site data
+        run: npm run generate:site -- --check
+      - name: Fail if README.md is out of sync
+        run: |
+          if ! git diff --exit-code -- README.md; then
+            echo "README.md is out of sync with dictionary/, internal/Curriculum.md, or internal/README.template.md."
+            echo "Run: npm run generate && commit the result."
+            exit 1
+          fi
+      - name: Fail if site data is out of sync
+        run: |
+          if ! git diff --exit-code -- site/src/data internal/layout.lock.json; then
+            echo "Generated site data is out of sync with dictionary/."
+            echo "Run: npm run generate && commit the result."
+            exit 1
+          fi
+      - name: Build the site
+        run: npm -w site run build
+      - name: Assert static export exists
+        run: test -f site/out/index.html

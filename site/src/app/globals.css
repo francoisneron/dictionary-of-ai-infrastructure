@@ -1,0 +1,901 @@
+/*
+ * Design tokens.
+ *
+ * The layout scale is vw-proportional, keyed off a nominal device width: --safe
+ * and --gap are defined as a fraction of the viewport rather than fixed pixels,
+ * so everything downstream recomputes from two variables at each breakpoint.
+ */
+
+:root {
+  /* Paper and ink */
+  --color-paper: #eaeae8;
+  /* Same colour as channels, so label halos can take a depth-varying alpha. */
+  --color-paper-rgb: 234, 234, 232;
+  --color-ink: #1a1a19;
+  --color-white: #fff;
+  --color-black: #000;
+  --surface: #e2e2e0;
+  --surface-2: #d9d9d7;
+  --line: #1a1a1924;
+  --line-strong: #1a1a1947;
+  --section-paper: #f2f2f0;
+  --section-ink: #1a1a19;
+
+  /* Accents */
+  --color-blue: #0070f3;
+  --color-purple: #7928ca;
+  --color-red: #e30613;
+  --color-pink: #ff0080;
+  --color-green: #00a86b;
+
+  /* Motion */
+  --duration-fast: 0.2s;
+  --duration: 0.4s;
+  --duration-slow: 0.8s;
+  --ease-gleasing: cubic-bezier(0.4, 0, 0, 1);
+  --ease-out-expo: cubic-bezier(0.19, 1, 0.22, 1);
+  --ease-out-quart: cubic-bezier(0.165, 0.84, 0.44, 1);
+  --ease-in-out-quart: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-in-out-cubic: cubic-bezier(0.645, 0.045, 0.355, 1);
+
+  /* Layout scale — mobile definitions */
+  --device-width: 375;
+  --columns: 4;
+  --safe: calc(((16 * 100) / var(--device-width)) * 1vw);
+  --gap: calc(((16 * 100) / var(--device-width)) * 1vw);
+  --layout-width: calc(100vw - (2 * var(--safe)));
+  --column-width: calc(
+    (var(--layout-width) - (var(--columns) - 1) * var(--gap)) / var(--columns)
+  );
+  --header-height: calc(((58 * 100) / var(--device-width)) * 1vw);
+
+  /* Distance from the viewport edge to the floating chrome. Scales between
+     mobile and desktop rather than sitting at a fixed pixel offset. */
+  --chrome-inset: clamp(14px, 2vw, 28px);
+
+  /* Type */
+  --font-ui: "Helvetica Neue", Helvetica, Arial, system-ui, sans-serif;
+  --font-serif: "Times New Roman", Times, serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+@media (min-width: 768px) {
+  :root {
+    --device-width: 768;
+    --columns: 8;
+  }
+}
+
+@media (min-width: 1200px) {
+  :root {
+    --device-width: 1440;
+    --columns: 12;
+  }
+}
+
+/* One switch for CSS and canvas alike. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast: 0.01ms;
+    --duration: 0.01ms;
+    --duration-slow: 0.01ms;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-serif);
+  /* The atlas fills the viewport and pans; the page itself never scrolls. */
+  overflow: hidden;
+  overscroll-behavior: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 9999;
+}
+
+/*
+ * Label overlay. The container ignores pointer events so the canvas keeps
+ * receiving drags; individual labels take them back, which makes each label the
+ * accessible click and focus target for its node.
+ */
+.atlas-labels {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.atlas-label {
+  position: absolute;
+  top: 0;
+  left: 0;
+  padding: 1px 4px;
+  border: 0;
+  border-radius: 2px;
+  background: transparent;
+  color: var(--color-ink);
+  /* Monospace, uppercase, letter-spaced — the map's own register, distinct
+     from the panel's prose. */
+  font-family: var(--font-mono);
+  /* Clamped rather than scaled with zoom: text that scales feels like a zoomed
+     image, text that holds its size feels like a map. */
+  font-size: 9.5px;
+  font-weight: 500;
+  line-height: 1.3;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  cursor: pointer;
+  pointer-events: auto;
+  opacity: 0;
+  visibility: hidden;
+  /* Labels sit over nodes and edges at every depth, so they carry their own
+     paper ground rather than relying on whatever happens to be behind them.
+     The halo fades with depth along with the text — held at full strength it
+     keeps distant labels crisp and cancels out the recession. */
+  --halo: 1;
+  text-shadow:
+    0 0 3px rgba(var(--color-paper-rgb), var(--halo)),
+    0 0 3px rgba(var(--color-paper-rgb), var(--halo)),
+    0 0 6px rgba(var(--color-paper-rgb), var(--halo));
+  /* Visibility flips only after the opacity ramp finishes, so a label that
+     loses its place fades out instead of blinking. The same ramp smooths the
+     per-frame depth steps, so quantising opacity never shows as banding. */
+  transition:
+    opacity var(--duration-fast) var(--ease-gleasing),
+    visibility 0s linear var(--duration-fast);
+  will-change: transform;
+  contain: layout style;
+}
+
+.atlas-label.is-visible {
+  /* Opacity is not set here on purpose: the render loop writes it inline per
+     frame from the node's depth, and an inline value always wins over a class. */
+  visibility: visible;
+  transition:
+    opacity var(--duration-fast) var(--ease-gleasing),
+    visibility 0s;
+}
+
+/* Hovered, selected, and adjacent terms come forward on opacity alone — the
+   render loop writes 1 inline for them. An inverted pill reads as a badge stuck
+   to the map; a clean step to full contrast reads as the thing being nearer. */
+.atlas-label.is-active {
+  font-weight: 600;
+}
+
+.atlas-label:focus-visible {
+  outline: 1.5px solid var(--color-ink);
+  outline-offset: 2px;
+  opacity: 1;
+  visibility: visible;
+}
+
+/* --- chrome buttons ---------------------------------------------------- */
+
+.chrome-corner {
+  position: fixed;
+  z-index: 5;
+  display: flex;
+  gap: 6px;
+}
+
+.chrome-corner-tr {
+  top: var(--chrome-inset);
+  right: var(--chrome-inset);
+}
+
+.chrome-corner-br {
+  /* Steps aside when the entry panel is open, so the toggles never sit on top
+     of its prev/next footer. */
+  right: calc(var(--chrome-inset) + var(--panel-width, 0px));
+  bottom: var(--chrome-inset);
+  transition: right var(--duration) var(--ease-gleasing);
+}
+
+.chrome-button {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--section-paper);
+  color: var(--color-ink);
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-gleasing),
+    border-color var(--duration-fast) var(--ease-gleasing);
+}
+
+.chrome-button:hover {
+  border-color: var(--line-strong);
+  background: var(--surface);
+}
+
+.chrome-button.is-on {
+  background: var(--color-ink);
+  border-color: var(--color-ink);
+  color: var(--color-paper);
+}
+
+.chrome-button:focus-visible {
+  outline: 2px solid var(--color-ink);
+  outline-offset: 2px;
+}
+
+/* --- search ------------------------------------------------------------ */
+
+.atlas-search {
+  position: fixed;
+  top: var(--chrome-inset);
+  left: var(--chrome-inset);
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.atlas-search-field {
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--section-paper);
+  transition: border-color var(--duration-fast) var(--ease-gleasing);
+}
+
+.atlas-search.is-open .atlas-search-field {
+  border-color: var(--line-strong);
+}
+
+.atlas-search-trigger {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-ink);
+  cursor: pointer;
+}
+
+.atlas-search-input {
+  width: 0;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--color-ink);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  transition: width var(--duration) var(--ease-gleasing);
+}
+
+.atlas-search.is-open .atlas-search-input {
+  width: min(268px, calc(100vw - 2 * var(--chrome-inset) - 96px));
+  padding: 0 12px 0 2px;
+}
+
+.atlas-search-hint {
+  margin-top: 7px;
+  padding-left: 2px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--color-ink);
+  opacity: 0.42;
+}
+
+.atlas-search-results {
+  width: min(310px, calc(100vw - 2 * var(--chrome-inset)));
+  margin: 6px 0 0;
+  padding: 4px;
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--section-paper);
+}
+
+.atlas-search-results button {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 2px;
+  background: transparent;
+  color: var(--color-ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.atlas-search-results li.is-active button,
+.atlas-search-results button:hover {
+  background: var(--surface-2);
+}
+
+.hit-label {
+  font-family: var(--font-ui);
+  font-size: 13.5px;
+  font-weight: 500;
+}
+
+.hit-label mark {
+  background: transparent;
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.hit-section {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  opacity: 0.5;
+}
+
+/* --- entry panel ------------------------------------------------------- */
+
+.entry-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  width: min(470px, 100vw);
+  height: 100dvh;
+  background: var(--section-paper);
+  border-left: 1px solid var(--line);
+}
+
+.entry-panel-scroll {
+  flex: 1;
+  min-height: 0;
+  padding: 22px 30px 28px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.entry-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.entry-panel-section {
+  flex: 1;
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  opacity: 0.55;
+}
+
+.entry-panel-count {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.entry-panel-count span {
+  opacity: 0.45;
+}
+
+.entry-panel-close {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--color-ink);
+  cursor: pointer;
+  opacity: 0.6;
+}
+
+.entry-panel-close:hover {
+  opacity: 1;
+  background: var(--surface-2);
+}
+
+.entry-panel-title {
+  margin: 22px 0 14px;
+  font-family: var(--font-ui);
+  font-size: clamp(30px, 3.4vw, 44px);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.02;
+}
+
+.entry-panel-lede {
+  margin: 0 0 26px;
+  font-family: var(--font-ui);
+  font-size: 15.5px;
+  line-height: 1.42;
+  max-width: 40ch;
+}
+
+.entry-panel-label {
+  margin: 0 0 10px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  opacity: 0.5;
+}
+
+/* The overheard exchange: a question, then the answer that names the term. */
+.entry-heard-block {
+  margin-bottom: 6px;
+}
+
+.heard-bubble {
+  margin: 0 0 8px;
+  padding: 9px 13px;
+  border-radius: 4px;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.heard-q {
+  border: 1px solid var(--line-strong);
+  background: transparent;
+  max-width: 88%;
+}
+
+.heard-a {
+  margin-left: auto;
+  max-width: 92%;
+  background: var(--color-ink);
+  color: var(--color-paper);
+}
+
+.entry-connects ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 0 0 6px;
+  padding: 0;
+  list-style: none;
+}
+
+.entry-connects button {
+  padding: 3px 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-ink);
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: background-color var(--duration-fast) var(--ease-gleasing);
+}
+
+.entry-connects button:hover {
+  background: var(--color-ink);
+  color: var(--color-paper);
+}
+
+.entry-panel-body {
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.5;
+  /* Collapsed by default; Read more lifts the clamp. */
+  max-height: 7.5em;
+  overflow: hidden;
+  mask-image: linear-gradient(to bottom, #000 60%, transparent 100%);
+}
+
+.entry-panel-body.is-expanded {
+  max-height: none;
+  mask-image: none;
+}
+
+.entry-panel-body p {
+  margin: 0 0 0.8em;
+}
+
+.entry-panel-body a {
+  color: inherit;
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.entry-panel-body a:hover {
+  text-decoration-color: currentColor;
+  background: var(--surface-2);
+}
+
+.entry-panel-body table {
+  width: 100%;
+  margin: 0 0 1em;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.entry-panel-body th,
+.entry-panel-body td {
+  padding: 5px 8px 5px 0;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.entry-panel-body th {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.entry-panel-body .avoid {
+  padding: 9px 11px;
+  border-left: 2px solid var(--line-strong);
+  background: var(--surface);
+}
+
+.entry-panel-body .avoid-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  opacity: 0.6;
+}
+
+.entry-panel-body .avoid-label::after {
+  content: ": ";
+}
+
+.entry-readmore {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-ink);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  cursor: pointer;
+  opacity: 0.55;
+}
+
+.entry-readmore:hover {
+  opacity: 1;
+}
+
+.entry-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+.entry-actions .action {
+  padding: 6px 13px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-ink);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.entry-actions .action.primary {
+  background: var(--color-ink);
+  border-color: var(--color-ink);
+  color: var(--color-paper);
+}
+
+.entry-actions .action:hover {
+  border-color: var(--color-ink);
+}
+
+.entry-panel-nav {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  flex: none;
+  border-top: 1px solid var(--line);
+}
+
+.entry-panel-nav button {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 14px 18px;
+  border: 0;
+  background: transparent;
+  color: var(--color-ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.entry-panel-nav button:last-child {
+  align-items: flex-end;
+  text-align: right;
+  border-left: 1px solid var(--line);
+}
+
+.entry-panel-nav button:hover:not(:disabled) {
+  background: var(--surface);
+}
+
+.entry-panel-nav button:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.nav-dir {
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  opacity: 0.5;
+}
+
+.nav-term {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+/* --- info modal -------------------------------------------------------- */
+
+.info-modal {
+  position: fixed;
+  top: calc(var(--chrome-inset) + 48px);
+  right: var(--chrome-inset);
+  z-index: 6;
+  width: min(370px, calc(100vw - 2 * var(--chrome-inset)));
+  padding: 20px 22px 18px;
+  background: var(--section-paper);
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+}
+
+.info-modal h2 {
+  margin: 0 0 10px;
+  font-family: var(--font-ui);
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.info-modal p {
+  margin: 0 0 10px;
+  font-family: var(--font-serif);
+  font-size: 14.5px;
+  line-height: 1.48;
+}
+
+.info-modal-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-family: var(--font-mono) !important;
+  font-size: 10px !important;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.65;
+}
+
+.info-modal kbd {
+  font-family: inherit;
+  font-weight: 700;
+}
+
+.info-modal-close {
+  padding: 5px 11px;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  background: transparent;
+  color: var(--color-ink);
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+/* --- loading screen ---------------------------------------------------- */
+
+.loading-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-paper);
+  transition:
+    opacity var(--duration) var(--ease-gleasing),
+    visibility var(--duration);
+}
+
+.loading-screen.is-done {
+  opacity: 0;
+  visibility: hidden;
+}
+
+.loading-credit {
+  margin: 0 0 12px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  opacity: 0.5;
+}
+
+.loading-title {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  margin: 0 0 26px;
+  font-family: var(--font-ui);
+  font-size: clamp(30px, 6vw, 50px);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.02;
+  text-transform: uppercase;
+  text-align: center;
+}
+
+.loading-word {
+  display: block;
+  opacity: 0;
+  transform: translateY(0.32em);
+  animation: loading-word-in 0.6s var(--ease-out-expo) forwards;
+}
+
+@keyframes loading-word-in {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.loading-bar {
+  position: relative;
+  width: 208px;
+  height: 2px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.loading-fill {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--color-ink);
+  transform-origin: left center;
+  transition: transform 0.18s linear;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading-word {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* --- no-WebGL fallback ------------------------------------------------- */
+
+.no-webgl {
+  max-width: 70ch;
+  margin: 0 auto;
+  padding: 3rem var(--safe) 1rem;
+}
+
+.no-webgl h1 {
+  font-family: var(--font-ui);
+  font-size: 30px;
+  letter-spacing: -0.02em;
+}
+
+.no-webgl p {
+  font-family: var(--font-serif);
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+/* Without WebGL the article stops being screen-reader-only and becomes the
+   page: an editorial reading view rather than a blank canvas. */
+.no-webgl ~ #dictionary {
+  position: static;
+  width: auto;
+  height: auto;
+  max-width: 70ch;
+  margin: 0 auto;
+  padding: 0 var(--safe) 4rem;
+  clip: auto;
+  white-space: normal;
+  font-family: var(--font-serif);
+  line-height: 1.55;
+}
+
+.no-webgl ~ #dictionary h1 {
+  display: none;
+}
+
+.atlas-status {
+  position: fixed;
+  left: var(--safe);
+  bottom: var(--safe);
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-ink);
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.skip-link:focus {
+  left: var(--safe);
+  top: var(--safe);
+  padding: 0.5rem 1rem;
+  background: var(--color-ink);
+  color: var(--color-paper);
+  font-family: var(--font-ui);
+  font-size: 14px;
+}

@@ -1,0 +1,7 @@
+{
+  "files.readonlyInclude": {
+    "README.md": true,
+    "site/src/data/**": true,
+    "internal/layout.lock.json": true
+  }
+}

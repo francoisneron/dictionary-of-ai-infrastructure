@@ -1,0 +1,30 @@
+{
+  "name": "ai-infrastructure-dictionary",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "site"
+  ],
+  "scripts": {
+    "generate": "npm run generate:readme && npm run generate:site",
+    "generate:readme": "tsx internal/generate-readme.ts",
+    "generate:site": "tsx internal/generate-site.ts",
+    "relayout": "tsx internal/generate-site.ts --relayout",
+    "check": "tsx internal/generate-site.ts --check",
+    "typecheck": "tsc -p internal/tsconfig.json",
+    "dev": "npm run generate && npm -w site run dev",
+    "build": "npm run generate && npm -w site run build",
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "@types/d3-force": "^3.0.10",
+    "@types/node": "^22.10.0",
+    "d3-force": "^3.0.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.4.0",
+    "marked": "^15.0.0",
+    "prettier": "^3.8.3",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

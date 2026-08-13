@@ -1,0 +1,11 @@
+# Normalize to LF in the repository. The freshness check in CI regenerates
+# README.md and site/src/data/ and diffs the result, so a checkout that
+# rewrites line endings would fail that diff on every platform but the one the
+# files were committed from.
+* text=auto eol=lf
+
+# Generated — collapse in diffs and don't count toward language stats.
+README.md linguist-generated=true
+site/src/data/** linguist-generated=true
+internal/layout.lock.json linguist-generated=true
+package-lock.json linguist-generated=true

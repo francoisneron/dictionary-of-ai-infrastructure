@@ -1,0 +1,3 @@
+npx lint-staged
+npm run generate
+git add README.md site/src/data internal/layout.lock.json
