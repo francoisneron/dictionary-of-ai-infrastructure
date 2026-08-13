@@ -8,4 +8,5 @@
 README.md linguist-generated=true
 site/src/data/** linguist-generated=true
 internal/layout.lock.json linguist-generated=true
+site/next-env.d.ts linguist-generated=true
 package-lock.json linguist-generated=true

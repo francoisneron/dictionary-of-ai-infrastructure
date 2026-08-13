@@ -8,12 +8,11 @@
 // sheet sliding rather than as a UI beep, which suits the editorial palette
 // better than the synth blips these interfaces usually ship with.
 
-type SoundName = "hover" | "select" | "open" | "close" | "search" | "fly";
+type SoundName = "select" | "open" | "close" | "search" | "fly";
 
 let ctx: AudioContext | null = null;
 let master: GainNode | null = null;
 let muted = true;
-let lastHover = 0;
 
 /**
  * The context is constructed on the first real user gesture, never at module
@@ -120,14 +119,6 @@ export function play(name: SoundName): void {
   if (!c || !master || c.state !== "running") return;
 
   switch (name) {
-    case "hover": {
-      // Dragging across a dense cluster would otherwise machine-gun this.
-      const now = performance.now();
-      if (now - lastHover < 60) return;
-      lastHover = now;
-      tone(c, master, 2400, 2400, 0.018, 0.03);
-      break;
-    }
     case "select":
       tone(c, master, 660, 880, 0.06, 0.14);
       sweep(c, master, 1800, 700, 0.03, 0.05);

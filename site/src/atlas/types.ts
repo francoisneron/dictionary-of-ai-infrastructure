@@ -3,10 +3,6 @@
 export type AtlasSection = {
   index: number;
   title: string;
-  heading: string;
-  slug: string;
-  nodeCount: number;
-  accent: number;
 };
 
 export type AtlasNode = {
@@ -22,7 +18,6 @@ export type AtlasNode = {
   y: number;
   z: number;
   degree: number;
-  backboneDegree: number;
   related: number[];
   outbound: number[];
   inbound: number[];
@@ -36,22 +31,11 @@ export type AtlasEdge = {
   w: number;
   /** 1 = backbone, 0 = secondary. */
   t: 0 | 1;
-  /** 1 = a->b, 2 = b->a, 3 = mutual. */
-  d: 1 | 2 | 3;
   /** Signed curvature offset. */
   c: number;
 };
 
 export type Atlas = {
-  version: number;
-  bounds: {
-    minX: number;
-    minY: number;
-    minZ: number;
-    maxX: number;
-    maxY: number;
-    maxZ: number;
-  };
   sections: AtlasSection[];
   nodes: AtlasNode[];
   edges: AtlasEdge[];

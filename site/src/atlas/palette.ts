@@ -90,7 +90,6 @@ export const PAGE_THEME_VARS = [
   "--surface",
   "--surface-2",
   "--section-paper",
-  "--section-ink",
   "--line",
   "--line-strong",
 ] as const;
@@ -127,7 +126,6 @@ export function sectionPageTheme(section: number): PageTheme {
       "--surface": hexOf(mix(paper, ink, 0.07)),
       "--surface-2": hexOf(mix(paper, ink, 0.14)),
       "--section-paper": hexOf(mix(paper, ink, 0.04)),
-      "--section-ink": inkHex,
       "--line": rgba(ink, 0.16),
       "--line-strong": rgba(ink, 0.3),
     },

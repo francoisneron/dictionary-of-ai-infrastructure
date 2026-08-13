@@ -189,11 +189,12 @@ export default function AtlasLabels({ controller, onSelect }: Props) {
 
         const active = i === hover || i === focus;
         const related = isNeighbour[i] === 1;
+        // Related labels come forward on opacity alone (below); only the
+        // active label carries a class.
         const mark = active ? 2 : related ? 1 : 0;
         if (marked[i] !== mark) {
           marked[i] = mark;
           el.classList.toggle("is-active", mark === 2);
-          el.classList.toggle("is-related", mark === 1);
         }
 
         // Behind the camera ramps to zero rather than relying on the stylesheet,

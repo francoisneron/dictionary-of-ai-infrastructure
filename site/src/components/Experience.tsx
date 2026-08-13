@@ -20,6 +20,19 @@ import {
 
 const atlas = atlasData as unknown as Atlas;
 
+/** Width of the entry panel; `.entry-panel` in globals.css uses the same value. */
+const PANEL_WIDTH = 470;
+/** Minimum map width that must stay visible beside the panel for the camera to
+ *  bother shifting the graph aside. */
+const PANEL_CLEARANCE = 240;
+
+/** How much of the right edge the open panel covers, in CSS px. Zero when the
+ *  panel is closed or the viewport is too narrow to step around it. */
+function panelInset(open: boolean): number {
+  const width = Math.min(PANEL_WIDTH, window.innerWidth);
+  return open && window.innerWidth > width + PANEL_CLEARANCE ? width : 0;
+}
+
 /**
  * Root of the interactive layer. Holds the controller and the low-frequency
  * state; everything that changes at frame rate stays inside the controller.
@@ -98,19 +111,18 @@ export default function Experience() {
   // inset drops back to zero.
   useEffect(() => {
     const update = () => {
-      const panelWidth = Math.min(470, window.innerWidth);
-      const covered = selected !== null && window.innerWidth > panelWidth + 240;
-      controller?.setInsetRight(covered ? panelWidth : 0);
+      const inset = panelInset(selected !== null);
+      controller?.setInsetRight(inset);
       // The floating chrome reads this to step aside from the panel.
       const root = document.documentElement;
-      root.style.setProperty(
-        "--panel-width",
-        covered ? `${panelWidth}px` : "0px"
-      );
+      root.style.setProperty("--panel-width", `${inset}px`);
       // Open but too narrow to step around means the panel is the whole
       // viewport, and there is nowhere for the chrome to move to. Flagged here
       // rather than as a CSS breakpoint so the width stays defined in one place.
-      root.classList.toggle("panel-fills-view", selected !== null && !covered);
+      root.classList.toggle(
+        "panel-fills-view",
+        selected !== null && inset === 0
+      );
     };
     update();
     window.addEventListener("resize", update);
@@ -123,8 +135,7 @@ export default function Experience() {
     c?.select(index);
     // Set the inset before flying, so the first selection is offset too rather
     // than only every one after it.
-    const panelWidth = Math.min(470, window.innerWidth);
-    c?.setInsetRight(window.innerWidth > panelWidth + 240 ? panelWidth : 0);
+    c?.setInsetRight(panelInset(true));
     c?.flyTo(index);
     play("fly");
   }, []);

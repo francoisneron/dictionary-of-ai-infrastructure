@@ -9,7 +9,6 @@ const entries = entriesData as Record<
     label: string;
     definition: string;
     heard: { question: string; answer: string } | null;
-    full: string;
   }
 >;
 

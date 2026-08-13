@@ -84,21 +84,3 @@ function wrapAvoid(html: string): string {
       `<p class="avoid"><span class="avoid-label">Avoid</span>${rest}</p>`
   );
 }
-
-/** Full entry HTML including the dialogue — used by the sr-only article. */
-export function renderFull(body: string, knownTerms: Set<string>): string {
-  const html = marked.parse(withAnchors(body, knownTerms), { async: false });
-  return wrapAvoid(html).replace(
-    /<p><em>Usage:<\/em><\/p>/,
-    `<p class="usage-label">Heard in the wild</p>`
-  );
-}
-
-/** Plain text, for search indexing and word counts. */
-export function toPlainText(body: string): string {
-  return body
-    .replace(linkRe(), "$1")
-    .replace(/[*_`|]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}

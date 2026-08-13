@@ -20,8 +20,8 @@ import { createHash } from "node:crypto";
 import { fail, headingSlug, readEntries } from "./lib/entries.js";
 import { parseCurriculum, orderedTerms } from "./lib/curriculum.js";
 import { buildGraph, assignCurvature } from "./lib/graph.js";
-import { computeLayout, LOCK_VERSION, type Lock } from "./lib/layout.js";
-import { renderEntry, renderFull } from "./lib/markdown.js";
+import { computeLayout, type Lock } from "./lib/layout.js";
+import { renderEntry } from "./lib/markdown.js";
 import { validateEntries, validateGraph, report } from "./lib/validate.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -98,7 +98,6 @@ function main(): void {
       y: p.y,
       z: p.z,
       degree: n.degree,
-      backboneDegree: n.backboneDegree,
       related: n.related,
       outbound: n.outbound,
       inbound: n.inbound,
@@ -106,34 +105,14 @@ function main(): void {
     };
   });
 
-  const xs = layout.positions.map((p) => p.x);
-  const ys = layout.positions.map((p) => p.y);
-  const zs = layout.positions.map((p) => p.z);
   const atlas = {
-    version: 2,
-    bounds: {
-      minX: xs.length ? Math.min(...xs) : -1,
-      minY: ys.length ? Math.min(...ys) : -1,
-      minZ: zs.length ? Math.min(...zs) : -1,
-      maxX: xs.length ? Math.max(...xs) : 1,
-      maxY: ys.length ? Math.max(...ys) : 1,
-      maxZ: zs.length ? Math.max(...zs) : 1,
-    },
-    sections: sections.map((s, i) => ({
-      index: i,
-      title: s.title,
-      heading: s.heading,
-      slug: headingSlug(s.heading),
-      nodeCount: s.terms.length,
-      accent: i,
-    })),
+    sections: sections.map((s, i) => ({ index: i, title: s.title })),
     nodes,
     edges: graph.edges.map((e) => ({
       a: e.a,
       b: e.b,
       w: Math.round(e.w * 1e3) / 1e3,
       t: e.t,
-      d: e.d,
       c: e.c,
     })),
   };
@@ -148,21 +127,13 @@ function main(): void {
       label: string;
       definition: string;
       heard: { question: string; answer: string } | null;
-      full: string;
     }
   > = {};
   for (const term of terms) {
     const entry = entries.get(term);
     if (!entry) continue;
-    const body = entry.body.trimEnd();
-    const { definition, heard } = renderEntry(body, knownTerms);
-    entriesOut[headingSlug(term)] = {
-      label: term,
-      definition,
-      heard,
-      // The accessible article wants the entry whole, dialogue included.
-      full: renderFull(body, knownTerms),
-    };
+    const { definition, heard } = renderEntry(entry.body.trimEnd(), knownTerms);
+    entriesOut[headingSlug(term)] = { label: term, definition, heard };
   }
 
   const contentHash = createHash("sha256");

@@ -44,24 +44,34 @@ export default function AtlasSearch({ onPick }: Props) {
 
   const hits: Hit[] = query ? searchNodes(atlas.nodes, query) : [];
 
-  const close = useCallback(() => {
+  const reset = useCallback(() => {
     setOpen(false);
     setQuery("");
     setActive(0);
-    triggerRef.current?.focus();
   }, []);
+
+  const close = useCallback(() => {
+    reset();
+    triggerRef.current?.focus();
+  }, [reset]);
 
   const choose = useCallback(
     (hit: Hit | undefined) => {
       if (!hit) return;
       play("select");
       onPick(hit.index);
-      setOpen(false);
-      setQuery("");
-      setActive(0);
+      reset();
     },
-    [onPick]
+    [onPick, reset]
   );
+
+  const openAndFocus = useCallback(() => {
+    setOpen(true);
+    play("search");
+    // Focus on the next frame — the input only becomes focusable once `open`
+    // has rendered.
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -74,14 +84,12 @@ export default function AtlasSearch({ onPick }: Props) {
         (e.key === "/" && !typing)
       ) {
         e.preventDefault();
-        setOpen(true);
-        play("search");
-        requestAnimationFrame(() => inputRef.current?.focus());
+        openAndFocus();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [openAndFocus]);
 
   const onInputKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Escape") {
@@ -108,14 +116,7 @@ export default function AtlasSearch({ onPick }: Props) {
           className="atlas-search-trigger"
           aria-label="Search the dictionary"
           aria-expanded={open}
-          onClick={() => {
-            const next = !open;
-            setOpen(next);
-            if (next) {
-              play("search");
-              requestAnimationFrame(() => inputRef.current?.focus());
-            }
-          }}
+          onClick={() => (open ? setOpen(false) : openAndFocus())}
         >
           <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
             <circle

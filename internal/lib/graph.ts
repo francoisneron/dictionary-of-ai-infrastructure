@@ -14,7 +14,7 @@
 import { linkTargets, fail, type Entry } from "./entries.js";
 
 /** How many strongest edges each node contributes to the backbone. */
-export const BACKBONE_K = 3;
+const BACKBONE_K = 3;
 /** How many neighbours the entry panel lists as "related". */
 const RELATED_N = 6;
 
@@ -26,8 +26,6 @@ export type Edge = {
   w: number;
   /** 1 = backbone, 0 = secondary. */
   t: 0 | 1;
-  /** Direction: 1 = a->b, 2 = b->a, 3 = mutual. */
-  d: 1 | 2 | 3;
   /** Signed curvature offset, filled in by assignCurvature once positions exist. */
   c: number;
 };
@@ -36,7 +34,6 @@ export type GraphNode = {
   index: number;
   term: string;
   degree: number;
-  backboneDegree: number;
   related: number[];
   outbound: number[];
   inbound: number[];
@@ -84,24 +81,20 @@ export function buildGraph(
     }
   });
 
-  // Collapse to undirected edges, recording which way the links ran.
+  // Collapse to undirected edges. Direction survives on each node's
+  // outbound/inbound lists, which is where the panel reads it from.
   const edges: Edge[] = [];
   const edgeAt = new Map<string, Edge>();
   terms.forEach((_, i) => {
     for (const j of outbound[i]!) {
       const [a, b] = i < j ? [i, j] : [j, i];
       const key = `${a}:${b}`;
-      const existing = edgeAt.get(key);
-      const dir: 1 | 2 = i === a ? 1 : 2;
-      if (existing) {
-        if (existing.d !== dir) existing.d = 3;
-      } else {
+      if (!edgeAt.has(key)) {
         const edge: Edge = {
           a,
           b,
           w: cosine(neighbours[a]!, neighbours[b]!),
           t: 0,
-          d: dir,
           c: 0,
         };
         edgeAt.set(key, edge);
@@ -128,7 +121,6 @@ export function buildGraph(
       index: i,
       term,
       degree: neighbours[i]!.size,
-      backboneDegree: mine.filter((e) => e.t === 1).length,
       related,
       outbound: [...outbound[i]!].sort((x, y) => x - y),
       inbound: [...inbound[i]!].sort((x, y) => x - y),
